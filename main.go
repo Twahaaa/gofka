@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -11,10 +13,25 @@ import (
 	// "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
+type APIVersion struct {
+	CorrelationID         int32
+	ClientSoftwareName    []byte
+	ClientSoftwareVersion []byte
+}
+
+func readAPIVersion(r io.ByteReader) APIVersion {
+	var version APIVersion
+	binary.Read(r.(io.Reader), binary.BigEndian, &version.CorrelationID)
+	size, _ := binary.ReadUvarint(r)
+	fmt.Println("the version is", version)
+	fmt.Println("the size is", size)
+	return APIVersion{}
+}
+
 type Header struct {
-	Size int32
-	APIKey int16
-	APIVersion int16 
+	Size       int32
+	APIKey     int16
+	APIVersion int16
 }
 
 type Message struct {
@@ -36,7 +53,7 @@ func NewServer() *Server {
 }
 
 func (s *Server) Listen() error {
-	ln, err := net.Listen("tcp", "8000")
+	ln, err := net.Listen("tcp", ":9092")
 	if err != nil {
 		return err
 	}
@@ -67,7 +84,13 @@ func (s *Server) handleConn(conn net.Conn) {
 			return
 		}
 		rawMsg := buf[:n]
-		fmt.Println(rawMsg)
+
+		r := bytes.NewReader(rawMsg)
+		var header Header
+		binary.Read(r, binary.BigEndian, &header)
+		fmt.Println(header)
+
+		readAPIVersion(r)
 	}
 }
 
@@ -77,4 +100,21 @@ func main() {
 		log.Fatal(server.Listen())
 	}()
 	time.Sleep(time.Second)
+
+	fmt.Println("producing...")
+
+	err := StartProducer("prod", "hello from kafka prod")
+	if err != nil {
+		slog.Error("error from producer", "err", err)
+	}
+
+	run := true
+	topics := []string{"prod"}
+	err = StartConsumer(topics, &run)
+
+	if err != nil {
+		slog.Error("error from consumer", "err", err)
+	}
+
+	
 }
